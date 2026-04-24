@@ -54,6 +54,45 @@ An A2A Server responds to A2A protocol messages. The only requirement is that it
 | **Direction** | Outbound — the agent calls out | Inbound — other agents call in |
 | **What it handles** | Building JSON-RPC requests, parsing responses | Routing JSON-RPC requests to agent logic, building responses |
 
+
+
+Let's walk through what's happening:
+
+**Step 1 — Discovery (plain HTTP GET, no JSON-RPC).** Agent A knows Agent B's domain. It fetches the Agent Card with a regular GET request. This is not a JSON-RPC call — it's just a standard HTTP GET that returns JSON. From the card, Agent A learns:
+- The JSON-RPC endpoint URL (from `supportedInterfaces`)
+- What Agent B can do (from `skills`)
+- How to authenticate (from `securitySchemes`)
+
+**Step 2 — The actual call (JSON-RPC over HTTP POST).** Agent A constructs a JSON-RPC request with `method: "SendMessage"` and the message content in `params`. It sends this as an HTTP POST to the URL it learned from the Agent Card. The `Content-Type` is `application/json`. Auth credentials go in the `Authorization` header.
+
+Agent B receives the POST, parses the JSON-RPC envelope, sees the method is `SendMessage`, extracts the message from `params`, processes it (using whatever internal logic it has), and sends back a JSON-RPC response with the result.
+
+### Who Needs What
+
+This is the key question — who needs to have the JSON-RPC endpoint, and who needs to be able to send JSON-RPC requests:
+
+- **Agent B (the server / the one receiving work)** needs:
+  - An HTTP server running
+  - A `/.well-known/agent-card.json` endpoint (plain GET)
+  - A JSON-RPC endpoint (the URL declared in the Agent Card) that accepts POST requests and routes them to the right method handlers (`SendMessage`, `GetTask`, etc.)
+
+- **Agent A (the client / the one sending work)** needs:
+  - The ability to make HTTP GET requests (to fetch the Agent Card)
+  - The ability to make HTTP POST requests with JSON-RPC payloads (to call methods)
+  - Knowledge of Agent B's domain (so it knows where to look)
+
+Agent A does **not** need to run a server. Agent B does **not** need to make outbound requests (unless it's doing push notifications via webhooks). The relationship is client → server, just like a browser talking to a web API.
+
+### There Is No "Handshake"
+
+Unlike protocols like WebSocket or TLS, there is no formal handshake in A2A. There's no connection negotiation, no capability exchange before the first message. The flow is:
+
+1. Client reads the Agent Card (this is the closest thing to a "handshake" — the client learns what the server supports)
+2. Client sends a JSON-RPC request
+3. Server responds
+
+That's it. Every request is independent. There's no persistent connection (unless you're using SSE streaming, which is a one-way server-to-client stream after the initial POST). The client can send one request and walk away, or send a hundred. Each one is a standalone HTTP POST with a JSON-RPC payload.
+
 ### Client Side — Application Code vs Library Internals
 
 ```python
